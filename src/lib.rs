@@ -16,6 +16,7 @@ const INS_LDA_AY: Byte = 0xB9;
 const INS_LDA_IX: Byte = 0xA1;
 const INS_LDA_IY: Byte = 0xB1;
 
+#[derive(Default)]
 pub struct Cpu {
     pc: Word, // Program counter register
     sp: Word, // Stack pointer register
@@ -35,20 +36,7 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new() -> Self {
-        Cpu {
-            pc: 0,
-            sp: 0,
-            a: 0,
-            x: 0,
-            y: 0,
-            c: false,
-            z: false,
-            i: false,
-            d: false,
-            b: false,
-            v: false,
-            n: false,
-        }
+        Cpu::default()
     }
 
     pub fn reset(&mut self, memory: &mut Mem) {
@@ -108,7 +96,6 @@ impl Cpu {
     }
 
     /// Addressing Modes
-    ///
 
     /// Immediate addressing allows the programmer to directly specify an 8 bit constant within the instruction
     fn addr_immediate(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
@@ -120,8 +107,8 @@ impl Cpu {
     /// always zero. In zero page mode only the least significant byte of the address is held in the instruction making
     /// it shorter by one byte (important for space saving) and one less memory fetch during execution (important for speed).
     fn addr_zero_page(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
-        let zp_address = self.fetch_byte(cycles, memory) as Word;
-        self.read_byte(cycles, zp_address, memory)
+        let addr = self.fetch_byte(cycles, memory) as Word;
+        self.read_byte(cycles, addr, memory)
     }
 
     /// The address to be accessed by an instruction using indexed zero page addressing is calculated by taking the 8 bit
@@ -134,8 +121,8 @@ impl Cpu {
     /// last example but with $FF in the X register then the accumulator will be loaded from $007F (e.g. $80 + $FF => $7F)
     /// and not $017F.
     fn addr_zer_page_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
-        let zp_address = self.fetch_byte(cycles, memory);
-        let addr = self.overflowing_add(cycles, zp_address, self.x);
+        let addr = self.fetch_byte(cycles, memory);
+        let addr = self.overflowing_add(cycles, addr, self.x);
         self.read_byte(cycles, addr as Word, memory)
     }
 
@@ -260,7 +247,7 @@ impl Default for Mem {
 
 impl Mem {
     pub fn new() -> Self {
-        Mem([0; MAX_MEM])
+        Mem::default()
     }
 
     pub fn init(&mut self) {
