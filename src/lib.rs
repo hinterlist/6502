@@ -6,6 +6,15 @@ type Word = u16; // 16-bit value
 /// Instruction reference:
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
 ///
+/// ADC - Add with Carry
+// const INS_ADC_IM: Byte = 0x69;
+// const INS_ADC_ZP: Byte = 0x65;
+// const INS_ADC_ZPX: Byte = 0x75;
+// const INS_ADC_A: Byte = 0x6D;
+// const INS_ADC_AX: Byte = 0x7D;
+// const INS_ADC_AY: Byte = 0x79;
+// const INS_ADC_IX: Byte = 0x61;
+// const INS_ADC_IY: Byte = 0x71;
 /// LDA - Load Accumulator
 const INS_LDA_IM: Byte = 0xA9;
 const INS_LDA_ZP: Byte = 0xA5;
@@ -15,6 +24,12 @@ const INS_LDA_AX: Byte = 0xBD;
 const INS_LDA_AY: Byte = 0xB9;
 const INS_LDA_IX: Byte = 0xA1;
 const INS_LDA_IY: Byte = 0xB1;
+/// LDX - Load X Register
+const INS_LDX_IM: Byte = 0xA2;
+const INS_LDX_ZP: Byte = 0xA6;
+const INS_LDX_ZPY: Byte = 0xB6;
+const INS_LDX_A: Byte = 0xAE;
+const INS_LDX_AY: Byte = 0xBE;
 
 #[derive(Default)]
 pub struct Cpu {
@@ -87,12 +102,19 @@ impl Cpu {
         data
     }
 
-    /// Add two bytes ignoring overflow
-    fn overflowing_add(&mut self, cycles: &mut u32, a: Byte, b: Byte) -> Byte {
-        let (data, _) = a.overflowing_add(b);
-        *cycles -= 1;
+    fn read_word(&mut self, cycles: &mut u32, addr: Word, memory: &mut Mem) -> Word {
+        let data = memory.read_word(addr);
+        *cycles -= 2;
 
         data
+    }
+
+    /// Add two bytes ignoring overflow
+    fn overflowing_add(&mut self, cycles: &mut u32, a: Byte, b: Byte) -> (Byte, bool) {
+        let (data, overflow) = a.overflowing_add(b);
+        *cycles -= 1;
+
+        (data, overflow)
     }
 
     /// Addressing Modes
@@ -120,9 +142,17 @@ impl Cpu {
     /// The address calculation wraps around if the sum of the base address and the register exceed $FF. If we repeat the
     /// last example but with $FF in the X register then the accumulator will be loaded from $007F (e.g. $80 + $FF => $7F)
     /// and not $017F.
-    fn addr_zer_page_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_zero_page_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_byte(cycles, memory);
-        let addr = self.overflowing_add(cycles, addr, self.x);
+        let (addr, _) = self.overflowing_add(cycles, addr, self.x);
+        self.read_byte(cycles, addr as Word, memory)
+    }
+
+    /// The address to be accessed by an instruction using indexed zero page addressing is calculated by taking the 8 bit
+    /// zero page address from the instruction and adding the current value of the Y register to it. This mode can only be used with the LDX and STX instructions.
+    fn addr_zero_page_y(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+        let addr = self.fetch_byte(cycles, memory);
+        let (addr, _) = self.overflowing_add(cycles, addr, self.y);
         self.read_byte(cycles, addr as Word, memory)
     }
 
@@ -162,9 +192,7 @@ impl Cpu {
         let addr = (addr + self.x) as Word;
         *cycles -= 1;
 
-        let target_addr = self.read_byte(cycles, addr, memory) as Word;
-        let target_addr = target_addr << 8;
-        let target_addr = target_addr | self.read_byte(cycles, addr + 1, memory) as Word;
+        let target_addr = self.read_word(cycles, addr, memory);
 
         self.read_byte(cycles, target_addr, memory)
     }
@@ -182,56 +210,94 @@ impl Cpu {
     }
 
     /// Execute instructions for next X cycles
-    pub fn exec(&mut self, cycles: u32, memory: &mut Mem) {
+    pub fn exec(&mut self, cycles: u32, memory: &mut Mem) -> u32 {
         let mut cycles = cycles;
 
         while cycles > 0 {
             let instruction = self.fetch_byte(&mut cycles, memory);
 
             match instruction {
+                // INS_ADC_IM => {
+                //     let value = self.addr_immediate(&mut cycles, memory);
+                //     let (result, overflow) = self.overflowing_add(&mut cycles, self.a, value);
+                //     self.a = result;
+
+                //     self.adc_status(overflow);
+                // }
+                // LDA - Load Accumulator
                 INS_LDA_IM => {
                     self.a = self.addr_immediate(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
                 }
                 INS_LDA_ZP => {
                     self.a = self.addr_zero_page(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
                 }
                 INS_LDA_ZPX => {
-                    self.a = self.addr_zer_page_x(&mut cycles, memory);
-                    self.lda_status();
+                    self.a = self.addr_zero_page_x(&mut cycles, memory);
+                    self.ld_status(self.a);
                 }
                 INS_LDA_A => {
                     self.a = self.addr_absolute(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
                 }
                 INS_LDA_AX => {
                     self.a = self.addr_absolute_x(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
                 }
                 INS_LDA_AY => {
                     self.a = self.addr_absolute_y(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
                 }
                 INS_LDA_IX => {
                     self.a = self.addr_indirect_x(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
                 }
                 INS_LDA_IY => {
                     self.a = self.addr_indirect_y(&mut cycles, memory);
-                    self.lda_status();
+                    self.ld_status(self.a);
+                }
+                // LDX - Load X Register
+                INS_LDX_IM => {
+                    self.x = self.addr_immediate(&mut cycles, memory);
+                    self.ld_status(self.x)
+                }
+                INS_LDX_ZP => {
+                    self.x = self.addr_zero_page(&mut cycles, memory);
+                    self.ld_status(self.x)
+                }
+                INS_LDX_ZPY => {
+                    self.x = self.addr_zero_page_y(&mut cycles, memory);
+                    self.ld_status(self.x);
+                }
+                INS_LDX_A => {
+                    self.x = self.addr_absolute(&mut cycles, memory);
+                    self.ld_status(self.x)
+                }
+                INS_LDX_AY => {
+                    self.x = self.addr_absolute_y(&mut cycles, memory);
+                    self.ld_status(self.x);
                 }
                 _ => {
                     unreachable!()
                 }
             };
         }
+
+        cycles
     }
 
-    /// Update status flags after LDA instruction
-    fn lda_status(&mut self) {
-        self.z = self.a == 0;
-        self.n = (self.a << 7) > 0;
+    /// Update status flags after ADC instruction
+    // fn adc_status(&mut self, overflow: bool) {
+    //     self.z = self.a == 0;
+    //     self.n = (self.a << 7) > 0;
+    //     self.c = overflow;
+    // }
+
+    /// Update status flags after LDA, LDX, LDY instruction(s)
+    fn ld_status(&mut self, value: Byte) {
+        self.z = value == 0;
+        self.n = (value << 7) > 0;
     }
 }
 
@@ -271,6 +337,8 @@ impl Mem {
 
 #[cfg(test)]
 mod tests {
+    use std::mem;
+
     use super::*;
 
     fn init() -> (Cpu, Mem) {
@@ -281,15 +349,30 @@ mod tests {
         (cpu, memory)
     }
 
+    // #[test]
+    // // fn inst_adc_im() {
+    // //     let (mut cpu, mut memory) = init();
+
+    // //     memory.write_byte(0xFFFC, INS_ADC_IM);
+    // //     memory.write_byte(0xFFFD, 0x02);
+    // //     cpu.a = 0xFF;
+    // //     cpu.exec(2, &mut memory);
+
+    // //     assert_eq!(cpu.a, 0x01);
+    // //     assert!(cpu.c);
+    // // }
+
     #[test]
     fn inst_lda_im() {
         let (mut cpu, mut memory) = init();
 
         memory.write_byte(0xFFFC, INS_LDA_IM);
         memory.write_byte(0xFFFD, 0x0F);
-        cpu.exec(2, &mut memory);
+
+        let cycles = cpu.exec(2, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -299,9 +382,11 @@ mod tests {
         memory.write_byte(0xFFFC, INS_LDA_ZP);
         memory.write_byte(0xFFFD, 0x01);
         memory.write_byte(0x0001, 0x0F);
-        cpu.exec(3, &mut memory);
+
+        let cycles = cpu.exec(3, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -312,9 +397,11 @@ mod tests {
         memory.write_byte(0xFFFD, 0x01);
         memory.write_byte(0x02, 0x0F);
         cpu.x = 0x01;
-        cpu.exec(4, &mut memory);
+
+        let cycles = cpu.exec(4, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -325,9 +412,11 @@ mod tests {
         memory.write_byte(0xFFFD, 0xFF);
         memory.write_byte(0x7F, 0x0F);
         cpu.x = 0x80;
-        cpu.exec(4, &mut memory);
+
+        let cycles = cpu.exec(4, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -338,9 +427,11 @@ mod tests {
         memory.write_byte(0xFFFD, 0x12);
         memory.write_byte(0xFFFE, 0x34);
         memory.write_byte(0x1234, 0x0F);
-        cpu.exec(4, &mut memory);
+
+        let cycles = cpu.exec(4, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -352,9 +443,11 @@ mod tests {
         memory.write_byte(0xFFFE, 0x34);
         memory.write_byte(0x1235, 0x0F);
         cpu.x = 0x01;
-        cpu.exec(3, &mut memory);
+
+        let cycles = cpu.exec(3, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -366,9 +459,11 @@ mod tests {
         memory.write_byte(0xFFFE, 0x34);
         memory.write_byte(0x1235, 0x0F);
         cpu.y = 0x01;
-        cpu.exec(3, &mut memory);
+
+        let cycles = cpu.exec(3, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -383,9 +478,10 @@ mod tests {
         memory.write_byte(0x0046, 0x02);
         memory.write_byte(0x0102, 0x0F);
 
-        cpu.exec(6, &mut memory);
+        let cycles = cpu.exec(6, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -400,9 +496,10 @@ mod tests {
 
         memory.write_byte(0x0105, 0x0F);
 
-        cpu.exec(5, &mut memory);
+        let cycles = cpu.exec(5, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -411,9 +508,10 @@ mod tests {
 
         memory.write_byte(0xFFFC, INS_LDA_IM);
         memory.write_byte(0xFFFD, 0x0);
-        cpu.exec(2, &mut memory);
+        let cycles = cpu.exec(2, &mut memory);
 
         assert!(cpu.z);
+        assert_eq!(cycles, 0);
     }
 
     #[test]
@@ -422,8 +520,81 @@ mod tests {
 
         memory.write_byte(0xFFFC, INS_LDA_IM);
         memory.write_byte(0xFFFD, 0xFF);
-        cpu.exec(2, &mut memory);
+        let cycles = cpu.exec(2, &mut memory);
 
         assert!(cpu.n);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldx_im() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDX_IM);
+        memory.write_byte(0xFFFD, 0x0F);
+        let cycles = cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.x, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldx_zp() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDX_ZP);
+        memory.write_byte(0xFFFD, 0x01);
+        memory.write_byte(0x0001, 0x0F);
+
+        let cycles = cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.x, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldx_zpy() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDX_ZPY);
+        memory.write_byte(0xFFFD, 0x01);
+        memory.write_byte(0x02, 0x0F);
+        cpu.y = 0x01;
+
+        let cycles = cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.x, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldx_a() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDX_A);
+        memory.write_byte(0xFFFD, 0x12);
+        memory.write_byte(0xFFFE, 0x34);
+        memory.write_byte(0x1234, 0x0F);
+
+        let cycles = cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.x, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldx_ay() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDX_AY);
+        memory.write_byte(0xFFFD, 0x12);
+        memory.write_byte(0xFFFE, 0x34);
+        memory.write_byte(0x1235, 0x0F);
+        cpu.y = 0x01;
+
+        let cycles = cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.x, 0x0F);
+        assert_eq!(cycles, 0);
     }
 }
