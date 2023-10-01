@@ -6,7 +6,7 @@ type Word = u16; // 16-bit value
 /// Instruction reference:
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
 ///
-/// ADC - Add with Carry
+// ADC - Add with Carry
 // const INS_ADC_IM: Byte = 0x69;
 // const INS_ADC_ZP: Byte = 0x65;
 // const INS_ADC_ZPX: Byte = 0x75;
@@ -15,7 +15,7 @@ type Word = u16; // 16-bit value
 // const INS_ADC_AY: Byte = 0x79;
 // const INS_ADC_IX: Byte = 0x61;
 // const INS_ADC_IY: Byte = 0x71;
-/// LDA - Load Accumulator
+// LDA - Load Accumulator
 const INS_LDA_IM: Byte = 0xA9;
 const INS_LDA_ZP: Byte = 0xA5;
 const INS_LDA_ZPX: Byte = 0xB5;
@@ -24,12 +24,18 @@ const INS_LDA_AX: Byte = 0xBD;
 const INS_LDA_AY: Byte = 0xB9;
 const INS_LDA_IX: Byte = 0xA1;
 const INS_LDA_IY: Byte = 0xB1;
-/// LDX - Load X Register
+// LDX - Load X Register
 const INS_LDX_IM: Byte = 0xA2;
 const INS_LDX_ZP: Byte = 0xA6;
 const INS_LDX_ZPY: Byte = 0xB6;
 const INS_LDX_A: Byte = 0xAE;
 const INS_LDX_AY: Byte = 0xBE;
+// LDY - Load Y Register
+const INS_LDY_IM: Byte = 0xA0;
+const INS_LDY_LZ: Byte = 0xA4;
+const INS_LDY_LZX: Byte = 0xB4;
+const INS_LDY_A: Byte = 0xAC;
+const INS_LDY_AX: Byte = 0xBC;
 
 #[derive(Default)]
 pub struct Cpu {
@@ -277,6 +283,27 @@ impl Cpu {
                 INS_LDX_AY => {
                     self.x = self.addr_absolute_y(&mut cycles, memory);
                     self.ld_status(self.x);
+                }
+                // LDY - Load Y Register
+                INS_LDY_IM => {
+                    self.y = self.addr_immediate(&mut cycles, memory);
+                    self.ld_status(self.y)
+                }
+                INS_LDY_LZ => {
+                    self.y = self.addr_zero_page(&mut cycles, memory);
+                    self.ld_status(self.y)
+                }
+                INS_LDY_LZX => {
+                    self.y = self.addr_zero_page_x(&mut cycles, memory);
+                    self.ld_status(self.y);
+                }
+                INS_LDY_A => {
+                    self.y = self.addr_absolute(&mut cycles, memory);
+                    self.ld_status(self.y)
+                }
+                INS_LDY_AX => {
+                    self.y = self.addr_absolute_x(&mut cycles, memory);
+                    self.ld_status(self.y);
                 }
                 _ => {
                     unreachable!()
@@ -595,6 +622,78 @@ mod tests {
         let cycles = cpu.exec(3, &mut memory);
 
         assert_eq!(cpu.x, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldy_im() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDY_IM);
+        memory.write_byte(0xFFFD, 0x0F);
+        let cycles = cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.y, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldy_lz() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDY_LZ);
+        memory.write_byte(0xFFFD, 0x01);
+        memory.write_byte(0x0001, 0x0F);
+
+        let cycles = cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.y, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldy_lzx() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDY_LZX);
+        memory.write_byte(0xFFFD, 0x01);
+        memory.write_byte(0x02, 0x0F);
+        cpu.x = 0x01;
+
+        let cycles = cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.y, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldy_a() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDY_A);
+        memory.write_byte(0xFFFD, 0x12);
+        memory.write_byte(0xFFFE, 0x34);
+        memory.write_byte(0x1234, 0x0F);
+
+        let cycles = cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.y, 0x0F);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_ldy_ax() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_LDY_AX);
+        memory.write_byte(0xFFFD, 0x12);
+        memory.write_byte(0xFFFE, 0x34);
+        memory.write_byte(0x1235, 0x0F);
+        cpu.x = 0x01;
+
+        let cycles = cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.y, 0x0F);
         assert_eq!(cycles, 0);
     }
 }
