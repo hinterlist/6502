@@ -36,6 +36,10 @@ const INS_LDY_LZ: Byte = 0xA4;
 const INS_LDY_LZX: Byte = 0xB4;
 const INS_LDY_A: Byte = 0xAC;
 const INS_LDY_AX: Byte = 0xBC;
+// STA - Store Accumulator
+const INS_STA_ZP: Byte = 0x85;
+const INS_STA_ZPX: Byte = 0x95;
+const INST_STA_A: Byte = 0x8D;
 
 #[derive(Default)]
 pub struct Cpu {
@@ -84,12 +88,18 @@ impl Cpu {
 
     /// fetch one byte from memory using address from PC register and increase program counter
     pub fn fetch_byte(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
-        let data = memory.read_byte(self.pc);
+        let data = self.read_byte(cycles, self.pc, memory);
         self.pc += 1;
-        *cycles -= 1;
 
         data
     }
+
+    // NOTE: not sure we gonna need that
+    // /// store one byte in memory at address from PC register and increase program counter
+    // pub fn store_byte(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
+    //     self.write_byte(cycles, memory, self.pc, value);
+    //     self.pc += 1;
+    // }
 
     /// fetch one two bytes from memory using address from PC register and increase program counter
     pub fn fetch_word(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
@@ -106,6 +116,12 @@ impl Cpu {
         *cycles -= 1;
 
         data
+    }
+
+    /// write one byte to memory at specified address
+    pub fn write_byte(&mut self, cycles: &mut u32, memory: &mut Mem, addr: Word, value: Byte) {
+        memory.write_byte(addr, value);
+        *cycles -= 1;
     }
 
     fn read_word(&mut self, cycles: &mut u32, addr: Word, memory: &mut Mem) -> Word {
@@ -134,9 +150,14 @@ impl Cpu {
     /// only the first 256 bytes of memory (e.g. $0000 to $00FF) where the most significant byte of the address is
     /// always zero. In zero page mode only the least significant byte of the address is held in the instruction making
     /// it shorter by one byte (important for space saving) and one less memory fetch during execution (important for speed).
-    fn addr_zero_page(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_zero_page_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_byte(cycles, memory) as Word;
         self.read_byte(cycles, addr, memory)
+    }
+
+    fn addr_zero_page_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
+        let addr = self.fetch_byte(cycles, memory) as Word;
+        self.write_byte(cycles, memory, addr, value);
     }
 
     /// The address to be accessed by an instruction using indexed zero page addressing is calculated by taking the 8 bit
@@ -148,33 +169,54 @@ impl Cpu {
     /// The address calculation wraps around if the sum of the base address and the register exceed $FF. If we repeat the
     /// last example but with $FF in the X register then the accumulator will be loaded from $007F (e.g. $80 + $FF => $7F)
     /// and not $017F.
-    fn addr_zero_page_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_zero_page_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.fetch_byte(cycles, memory);
         let (addr, _) = self.overflowing_add(cycles, addr, self.x);
-        self.read_byte(cycles, addr as Word, memory)
+
+        addr as Word
+    }
+
+    fn addr_zero_page_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+        let addr = self.addr_zero_page_x(cycles, memory);
+        self.read_byte(cycles, addr, memory)
+    }
+
+    fn addr_zero_page_x_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
+        let addr = self.addr_zero_page_x(cycles, memory);
+        self.write_byte(cycles, memory, addr, value);
     }
 
     /// The address to be accessed by an instruction using indexed zero page addressing is calculated by taking the 8 bit
     /// zero page address from the instruction and adding the current value of the Y register to it. This mode can only be used with the LDX and STX instructions.
-    fn addr_zero_page_y(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_zero_page_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_byte(cycles, memory);
         let (addr, _) = self.overflowing_add(cycles, addr, self.y);
         self.read_byte(cycles, addr as Word, memory)
     }
 
     /// Instructions using absolute addressing contain a full 16 bit address to identify the target location.
-    fn addr_absolute(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_absolute(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.fetch_byte(cycles, memory) as Word;
         let addr = addr << 8;
         let addr = addr | (self.fetch_byte(cycles, memory) as Word);
 
+        addr as Word
+    }
+
+    fn addr_absolute_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+        let addr = self.addr_absolute(cycles, memory);
         self.read_byte(cycles, addr, memory)
+    }
+
+    fn addr_absolute_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
+        let addr = self.addr_absolute(cycles, memory);
+        self.write_byte(cycles, memory, addr, value);
     }
 
     /// The address to be accessed by an instruction using X register indexed absolute addressing is computed by
     /// taking the 16 bit address from the instruction and added the contents of the X register. For example if X
     /// contains $92 then an STA $2000,X instruction will store the accumulator at $2092 (e.g. $2000 + $92).
-    fn addr_absolute_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_absolute_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_word(cycles, memory);
         let addr = addr | (self.x as Word);
 
@@ -183,7 +225,7 @@ impl Cpu {
 
     /// The Y register indexed absolute addressing mode is the same as the previous mode only with the contents
     /// of the Y register added to the 16 bit address from the instruction.
-    fn addr_absolute_y(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_absolute_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_word(cycles, memory);
         let addr = addr | (self.y as Word);
 
@@ -193,7 +235,7 @@ impl Cpu {
     /// Indexed indirect addressing is normally used in conjunction with a table of address held on zero page.
     /// The address of the table is taken from the instruction and the X register added to it (with zero page wrap around)
     /// to give the location of the least significant byte of the target address.
-    fn addr_indirect_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_indirect_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_byte(cycles, memory);
         let addr = (addr + self.x) as Word;
         *cycles -= 1;
@@ -205,7 +247,7 @@ impl Cpu {
 
     /// In instruction contains the zero page location of the least significant byte of 16 bit address.
     /// The Y register is dynamically added to this value to generated the actual target address for operation.
-    fn addr_indirect_y(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_indirect_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         let addr = self.fetch_byte(cycles, memory) as Word;
         let target_addr = self.read_byte(cycles, addr, memory) as Word;
         let target_addr = target_addr << 8;
@@ -236,31 +278,31 @@ impl Cpu {
                     self.ld_status(self.a);
                 }
                 INS_LDA_ZP => {
-                    self.a = self.addr_zero_page(&mut cycles, memory);
+                    self.a = self.addr_zero_page_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 INS_LDA_ZPX => {
-                    self.a = self.addr_zero_page_x(&mut cycles, memory);
+                    self.a = self.addr_zero_page_x_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 INS_LDA_A => {
-                    self.a = self.addr_absolute(&mut cycles, memory);
+                    self.a = self.addr_absolute_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 INS_LDA_AX => {
-                    self.a = self.addr_absolute_x(&mut cycles, memory);
+                    self.a = self.addr_absolute_x_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 INS_LDA_AY => {
-                    self.a = self.addr_absolute_y(&mut cycles, memory);
+                    self.a = self.addr_absolute_y_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 INS_LDA_IX => {
-                    self.a = self.addr_indirect_x(&mut cycles, memory);
+                    self.a = self.addr_indirect_x_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 INS_LDA_IY => {
-                    self.a = self.addr_indirect_y(&mut cycles, memory);
+                    self.a = self.addr_indirect_y_read(&mut cycles, memory);
                     self.ld_status(self.a);
                 }
                 // LDX - Load X Register
@@ -269,19 +311,19 @@ impl Cpu {
                     self.ld_status(self.x)
                 }
                 INS_LDX_ZP => {
-                    self.x = self.addr_zero_page(&mut cycles, memory);
+                    self.x = self.addr_zero_page_read(&mut cycles, memory);
                     self.ld_status(self.x)
                 }
                 INS_LDX_ZPY => {
-                    self.x = self.addr_zero_page_y(&mut cycles, memory);
+                    self.x = self.addr_zero_page_y_read(&mut cycles, memory);
                     self.ld_status(self.x);
                 }
                 INS_LDX_A => {
-                    self.x = self.addr_absolute(&mut cycles, memory);
+                    self.x = self.addr_absolute_read(&mut cycles, memory);
                     self.ld_status(self.x)
                 }
                 INS_LDX_AY => {
-                    self.x = self.addr_absolute_y(&mut cycles, memory);
+                    self.x = self.addr_absolute_y_read(&mut cycles, memory);
                     self.ld_status(self.x);
                 }
                 // LDY - Load Y Register
@@ -290,20 +332,30 @@ impl Cpu {
                     self.ld_status(self.y)
                 }
                 INS_LDY_LZ => {
-                    self.y = self.addr_zero_page(&mut cycles, memory);
+                    self.y = self.addr_zero_page_read(&mut cycles, memory);
                     self.ld_status(self.y)
                 }
                 INS_LDY_LZX => {
-                    self.y = self.addr_zero_page_x(&mut cycles, memory);
+                    self.y = self.addr_zero_page_x_read(&mut cycles, memory);
                     self.ld_status(self.y);
                 }
                 INS_LDY_A => {
-                    self.y = self.addr_absolute(&mut cycles, memory);
+                    self.y = self.addr_absolute_read(&mut cycles, memory);
                     self.ld_status(self.y)
                 }
                 INS_LDY_AX => {
-                    self.y = self.addr_absolute_x(&mut cycles, memory);
+                    self.y = self.addr_absolute_x_read(&mut cycles, memory);
                     self.ld_status(self.y);
+                }
+                // Store Accumulator in Memory
+                INS_STA_ZP => {
+                    self.addr_zero_page_write(&mut cycles, memory, self.a);
+                }
+                INS_STA_ZPX => {
+                    self.addr_zero_page_x_write(&mut cycles, memory, self.a);
+                }
+                INST_STA_A => {
+                    self.addr_absolute_write(&mut cycles, memory, self.a);
                 }
                 _ => {
                     unreachable!()
@@ -364,8 +416,6 @@ impl Mem {
 
 #[cfg(test)]
 mod tests {
-    use std::mem;
-
     use super::*;
 
     fn init() -> (Cpu, Mem) {
@@ -695,5 +745,49 @@ mod tests {
 
         assert_eq!(cpu.y, 0x0F);
         assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_sta_zp() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_STA_ZP);
+        memory.write_byte(0xFFFD, 0x12);
+        cpu.a = 0x0E;
+
+        let cycles = cpu.exec(3, &mut memory);
+
+        assert_eq!(memory.read_byte(0x0012), 0x0E);
+        assert_eq!(cycles, 0);
+    }
+
+    #[test]
+    fn ins_sta_zpx() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INS_STA_ZPX);
+        memory.write_byte(0xFFFD, 0x0E);
+        cpu.x = 0x01;
+        cpu.a = 0x0E;
+
+        let cycles = cpu.exec(4, &mut memory);
+
+        assert_eq!(cycles, 0);
+        assert_eq!(memory.read_byte(0x000F), 0x0E);
+    }
+
+    #[test]
+    fn ins_sta_a() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(0xFFFC, INST_STA_A);
+        memory.write_byte(0xFFFD, 0x12);
+        memory.write_byte(0xFFFE, 0x34);
+        cpu.a = 0xE;
+
+        let cycles = cpu.exec(4, &mut memory);
+
+        assert_eq!(cycles, 0);
+        assert_eq!(memory.read_byte(0x1234), 0xE);
     }
 }
