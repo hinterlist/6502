@@ -1,3 +1,5 @@
+use std::ops::BitOr;
+
 type Byte = u8; // 8-bit value
 type Word = u16; // 16-bit value
 
@@ -8,50 +10,59 @@ pub const ENTRY_POINT: Word = 0x1000;
 ///
 /// Instruction reference:
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
-///
+
+// AND Memory with Accumulator
+const INST_AND_IM: Byte = 0x29;
+
 // ADC - Add with Carry
-const INS_ADC_IM: Byte = 0x69;
-const INS_ADC_ZP: Byte = 0x65;
-const INS_ADC_ZPX: Byte = 0x75;
-const INS_ADC_A: Byte = 0x6D;
-const INS_ADC_AX: Byte = 0x7D;
-const INS_ADC_AY: Byte = 0x79;
-const INS_ADC_IX: Byte = 0x61;
-const INS_ADC_IY: Byte = 0x71;
+const INST_ADC_IM: Byte = 0x69;
+const INST_ADC_ZP: Byte = 0x65;
+const INST_ADC_ZPX: Byte = 0x75;
+const INST_ADC_A: Byte = 0x6D;
+const INST_ADC_AX: Byte = 0x7D;
+const INST_ADC_AY: Byte = 0x79;
+const INST_ADC_IX: Byte = 0x61;
+const INST_ADC_IY: Byte = 0x71;
 
 // ASL - Shift Left One Bit (Memory or Accumulator)
-const INS_ASL_AC: Byte = 0x09;
-const INS_ASL_ZP: Byte = 0x06;
+const INST_ASL_AC: Byte = 0x0A;
+const INST_ASL_ZP: Byte = 0x06;
+const INST_ASL_ZPX: Byte = 0x16;
+const INST_ASL_A: Byte = 0x0E;
+const INST_ASL_AX: Byte = 0x1E;
 
 // LDA - Load Accumulator
-const INS_LDA_IM: Byte = 0xA9;
-const INS_LDA_ZP: Byte = 0xA5;
-const INS_LDA_ZPX: Byte = 0xB5;
-const INS_LDA_A: Byte = 0xAD;
-const INS_LDA_AX: Byte = 0xBD;
-const INS_LDA_AY: Byte = 0xB9;
-const INS_LDA_IX: Byte = 0xA1;
-const INS_LDA_IY: Byte = 0xB1;
+const INST_LDA_IM: Byte = 0xA9;
+const INST_LDA_ZP: Byte = 0xA5;
+const INST_LDA_ZPX: Byte = 0xB5;
+const INST_LDA_A: Byte = 0xAD;
+const INST_LDA_AX: Byte = 0xBD;
+const INST_LDA_AY: Byte = 0xB9;
+const INST_LDA_IX: Byte = 0xA1;
+const INST_LDA_IY: Byte = 0xB1;
+
 // LDX - Load X Register
-const INS_LDX_IM: Byte = 0xA2;
-const INS_LDX_ZP: Byte = 0xA6;
-const INS_LDX_ZPY: Byte = 0xB6;
-const INS_LDX_A: Byte = 0xAE;
-const INS_LDX_AY: Byte = 0xBE;
+const INST_LDX_IM: Byte = 0xA2;
+const INST_LDX_ZP: Byte = 0xA6;
+const INST_LDX_ZPY: Byte = 0xB6;
+const INST_LDX_A: Byte = 0xAE;
+const INST_LDX_AY: Byte = 0xBE;
+
 // LDY - Load Y Register
-const INS_LDY_IM: Byte = 0xA0;
-const INS_LDY_LZ: Byte = 0xA4;
-const INS_LDY_LZX: Byte = 0xB4;
-const INS_LDY_A: Byte = 0xAC;
-const INS_LDY_AX: Byte = 0xBC;
+const INST_LDY_IM: Byte = 0xA0;
+const INST_LDY_LZ: Byte = 0xA4;
+const INST_LDY_LZX: Byte = 0xB4;
+const INST_LDY_A: Byte = 0xAC;
+const INST_LDY_AX: Byte = 0xBC;
+
 // STA - Store Accumulator
-const INS_STA_ZP: Byte = 0x85;
-const INS_STA_ZPX: Byte = 0x95;
-const INS_STA_A: Byte = 0x8D;
-const INS_STA_AX: Byte = 0x9D;
-const INS_STA_AY: Byte = 0x99;
-const INS_STA_IX: Byte = 0x81;
-const INS_STA_IY: Byte = 0x91;
+const INST_STA_ZP: Byte = 0x85;
+const INST_STA_ZPX: Byte = 0x95;
+const INST_STA_A: Byte = 0x8D;
+const INST_STA_AX: Byte = 0x9D;
+const INST_STA_AY: Byte = 0x99;
+const INST_STA_IX: Byte = 0x81;
+const INST_STA_IY: Byte = 0x91;
 
 #[derive(Default)]
 pub struct Cpu {
@@ -69,6 +80,31 @@ pub struct Cpu {
     b: bool, // Break Command - The break command bit is set when a BRK instruction has been executed and an interrupt has been generated to process it.
     v: bool, // Overflow Flag - The overflow flag is set during arithmetic operations if the result has yielded an invalid 2’s complement result (e.g. adding to positive numbers and ending up with a negative result: 64 + 64 => -128). It is determined by looking at the carry between bits 6 and 7 and between bit 7 and the carry flag.
     n: bool, // Negative Flag - The negative flag is set if the result of the last operation had bit 7 set to a one.
+}
+
+#[repr(u8)]
+enum UpdateStatusFlag {
+    N = 0b0001,
+    Z = 0b0010,
+    C = 0b0100,
+    V = 0b1000,
+    All = 0b1111,
+}
+
+impl BitOr for UpdateStatusFlag {
+    type Output = u8;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        self as u8 | rhs as u8
+    }
+}
+
+impl BitOr<UpdateStatusFlag> for u8 {
+    type Output = u8;
+
+    fn bitor(self, rhs: UpdateStatusFlag) -> Self::Output {
+        self | rhs as u8
+    }
 }
 
 impl Cpu {
@@ -219,9 +255,11 @@ impl Cpu {
     /// only the first 256 bytes of memory (e.g. $0000 to $00FF) where the most significant byte of the address is
     /// always zero. In zero page mode only the least significant byte of the address is held in the instruction making
     /// it shorter by one byte (important for space saving) and one less memory fetch during execution (important for speed).
-    fn addr_zero_page_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_zero_page_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.fetch_byte(cycles, memory) as Word;
-        self.read_byte(cycles, addr, memory)
+        let value = self.read_byte(cycles, addr, memory);
+
+        (addr, value)
     }
 
     fn addr_zero_page_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
@@ -249,9 +287,11 @@ impl Cpu {
         addr as Word
     }
 
-    fn addr_zero_page_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_zero_page_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.addr_zero_page_x(cycles, memory);
-        self.read_byte(cycles, addr, memory)
+        let value = self.read_byte(cycles, addr, memory);
+
+        (addr, value)
     }
 
     fn addr_zero_page_x_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
@@ -291,9 +331,11 @@ impl Cpu {
     }
 
     /// Read byte from memory referenced by address specified in next byte pointed by PC registry
-    fn addr_absolute_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_absolute_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.addr_absolute(cycles, memory);
-        self.read_byte(cycles, addr, memory)
+        let value = self.read_byte(cycles, addr, memory);
+
+        (addr, value)
     }
 
     /// Write provided value to memory address referenced by address specified in next byte pointed by PC registry
@@ -302,9 +344,11 @@ impl Cpu {
         self.write_byte(cycles, memory, addr, value);
     }
 
-    fn addr_absolute_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_absolute_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.addr_absolute_x(cycles, memory);
-        self.read_byte(cycles, addr, memory)
+        let value = self.read_byte(cycles, addr, memory);
+
+        (addr, value)
     }
 
     /// Write provided value to memory address
@@ -344,11 +388,11 @@ impl Cpu {
         self.read_word(cycles, addr, memory)
     }
 
-    fn addr_indirect_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_indirect_x_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.addr_indirect_x(cycles, memory) as Word;
-        println!("Addr: {:#X}", addr);
+        let value = self.read_byte(cycles, addr, memory);
 
-        self.read_byte(cycles, addr, memory)
+        (addr, value)
     }
 
     fn addr_indirect_x_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
@@ -384,178 +428,336 @@ impl Cpu {
         let high_reset_vector = memory.read_byte(RESET_VEC + 1) as Word;
         self.pc = (high_reset_vector << 8) | low_reset_vector;
 
-        println!("PC: {:#X}", self.pc);
-
         let mut cycles = cycles;
 
         while cycles > 0 {
             let instruction = self.fetch_byte(&mut cycles, memory);
 
             match instruction {
+                // AND Memory with Accumulator
+                INST_AND_IM => {
+                    let value = self.addr_immediate(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
                 // ADC - Add with Carry
-                INS_ADC_IM => {
-                    let operand = self.addr_immediate(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_IM => {
+                    let value = self.addr_immediate(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_ZP => {
-                    let operand = self.addr_zero_page_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_ZP => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_ZPX => {
-                    let operand = self.addr_zero_page_x_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_ZPX => {
+                    let (_, value) = self.addr_zero_page_x_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_A => {
-                    let operand = self.addr_absolute_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_AX => {
-                    let operand = self.addr_absolute_x_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_AX => {
+                    let (_, value) = self.addr_absolute_x_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_AY => {
-                    let operand = self.addr_absolute_y_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_AY => {
+                    let value = self.addr_absolute_y_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_IX => {
-                    let operand = self.addr_indirect_x_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_IX => {
+                    let (_, value) = self.addr_indirect_x_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
-                INS_ADC_IY => {
-                    let operand = self.addr_indirect_y_read(&mut cycles, memory);
-                    let result = self.a as Word + operand as Word + self.c as Word;
+                INST_ADC_IY => {
+                    let value = self.addr_indirect_y_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
 
-                    self.adc_status(result, operand);
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
                     self.a = result as Byte;
                 }
                 // ASL Shift Left One Bit (Memory or Accumulator)
-                INS_ASL_AC => {
+                INST_ASL_AC => {
                     let result: Word = (self.a as Word) << 1;
                     self.a = result as Byte;
 
                     cycles -= 1;
 
-                    self.asl_status(result);
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+                        result,
+                        None,
+                    );
                 }
-                // INS_ASL_ZP => {
-                //     let
-                // }
+                INST_ASL_ZP => {
+                    let (addr, value) = self.addr_zero_page_read(&mut cycles, memory);
+                    let result = (value as Word) << 1;
+
+                    cycles -= 1;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+                        result,
+                        None,
+                    );
+                    self.write_byte(&mut cycles, memory, addr, result as Byte);
+                }
+                INST_ASL_ZPX => {
+                    let (addr, value) = self.addr_zero_page_x_read(&mut cycles, memory);
+                    let result = (value as Word) << 1;
+
+                    cycles -= 1;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+                        result,
+                        None,
+                    );
+                    self.write_byte(&mut cycles, memory, addr, result as Byte);
+                }
+                INST_ASL_A => {
+                    let (addr, value) = self.addr_absolute_read(&mut cycles, memory);
+                    let result = (value as Word) << 1;
+
+                    cycles -= 1;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+                        result,
+                        None,
+                    );
+                    self.write_byte(&mut cycles, memory, addr, result as Byte);
+                }
+                INST_ASL_AX => {
+                    let (addr, value) = self.addr_absolute_x_read(&mut cycles, memory);
+                    let result = (value as Word) << 1;
+
+                    // Absolute X addressing mode takes 1 cycle more, and shift takes 1 cycle
+                    cycles -= 2;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+                        result,
+                        None,
+                    );
+                    self.write_byte(&mut cycles, memory, addr, result as Byte);
+                }
                 // LDA - Load Accumulator
-                INS_LDA_IM => {
+                INST_LDA_IM => {
                     self.a = self.addr_immediate(&mut cycles, memory);
-                    self.ld_status(self.a);
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_ZP => {
-                    self.a = self.addr_zero_page_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                INST_LDA_ZP => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+
+                    self.a = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_ZPX => {
-                    self.a = self.addr_zero_page_x_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                INST_LDA_ZPX => {
+                    let (_, value) = self.addr_zero_page_x_read(&mut cycles, memory);
+
+                    self.a = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_A => {
-                    self.a = self.addr_absolute_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                INST_LDA_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+
+                    self.a = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_AX => {
-                    self.a = self.addr_absolute_x_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                INST_LDA_AX => {
+                    let (_, value) = self.addr_absolute_x_read(&mut cycles, memory);
+
+                    self.a = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_AY => {
+                INST_LDA_AY => {
                     self.a = self.addr_absolute_y_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_IX => {
-                    self.a = self.addr_indirect_x_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                INST_LDA_IX => {
+                    let (_, value) = self.addr_indirect_x_read(&mut cycles, memory);
+
+                    self.a = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
-                INS_LDA_IY => {
+                INST_LDA_IY => {
                     self.a = self.addr_indirect_y_read(&mut cycles, memory);
-                    self.ld_status(self.a);
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
                 }
                 // LDX - Load X Register
-                INS_LDX_IM => {
+                INST_LDX_IM => {
                     self.x = self.addr_immediate(&mut cycles, memory);
-                    self.ld_status(self.x)
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.x as Word,
+                        None,
+                    );
                 }
-                INS_LDX_ZP => {
-                    self.x = self.addr_zero_page_read(&mut cycles, memory);
-                    self.ld_status(self.x)
+                INST_LDX_ZP => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+
+                    self.x = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.x as Word,
+                        None,
+                    );
                 }
-                INS_LDX_ZPY => {
+                INST_LDX_ZPY => {
                     self.x = self.addr_zero_page_y_read(&mut cycles, memory);
-                    self.ld_status(self.x);
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.x as Word,
+                        None,
+                    );
                 }
-                INS_LDX_A => {
-                    self.x = self.addr_absolute_read(&mut cycles, memory);
-                    self.ld_status(self.x)
+                INST_LDX_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+
+                    self.x = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.x as Word,
+                        None,
+                    );
                 }
-                INS_LDX_AY => {
+                INST_LDX_AY => {
                     self.x = self.addr_absolute_y_read(&mut cycles, memory);
-                    self.ld_status(self.x);
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.x as Word,
+                        None,
+                    );
                 }
                 // LDY - Load Y Register
-                INS_LDY_IM => {
+                INST_LDY_IM => {
                     self.y = self.addr_immediate(&mut cycles, memory);
-                    self.ld_status(self.y)
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.y as Word,
+                        None,
+                    );
                 }
-                INS_LDY_LZ => {
-                    self.y = self.addr_zero_page_read(&mut cycles, memory);
-                    self.ld_status(self.y)
+                INST_LDY_LZ => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+
+                    self.y = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.y as Word,
+                        None,
+                    );
                 }
-                INS_LDY_LZX => {
-                    self.y = self.addr_zero_page_x_read(&mut cycles, memory);
-                    self.ld_status(self.y);
+                INST_LDY_LZX => {
+                    let (_, value) = self.addr_zero_page_x_read(&mut cycles, memory);
+
+                    self.y = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.y as Word,
+                        None,
+                    );
                 }
-                INS_LDY_A => {
-                    self.y = self.addr_absolute_read(&mut cycles, memory);
-                    self.ld_status(self.y)
+                INST_LDY_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+
+                    self.y = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.y as Word,
+                        None,
+                    );
                 }
-                INS_LDY_AX => {
-                    self.y = self.addr_absolute_x_read(&mut cycles, memory);
-                    self.ld_status(self.y);
+                INST_LDY_AX => {
+                    let (_, value) = self.addr_absolute_x_read(&mut cycles, memory);
+
+                    self.y = value;
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.y as Word,
+                        None,
+                    );
                 }
                 // Store Accumulator in Memory
-                INS_STA_ZP => {
+                INST_STA_ZP => {
                     self.addr_zero_page_write(&mut cycles, memory, self.a);
                 }
-                INS_STA_ZPX => {
+                INST_STA_ZPX => {
                     self.addr_zero_page_x_write(&mut cycles, memory, self.a);
                 }
-                INS_STA_A => {
+                INST_STA_A => {
                     self.addr_absolute_write(&mut cycles, memory, self.a);
                 }
-                INS_STA_AX => {
+                INST_STA_AX => {
                     self.addr_absolute_x_write(&mut cycles, memory, self.a);
                 }
-                INS_STA_AY => {
+                INST_STA_AY => {
                     self.addr_absolute_y_write(&mut cycles, memory, self.a);
                 }
-                INS_STA_IX => {
+                INST_STA_IX => {
                     self.addr_indirect_x_write(&mut cycles, memory, self.a);
                 }
-                INS_STA_IY => {
+                INST_STA_IY => {
                     self.addr_indirect_y_write(&mut cycles, memory, self.a);
                 }
                 _ => {
@@ -567,36 +769,28 @@ impl Cpu {
         cycles
     }
 
-    fn status_flag_nzc(&mut self, result: Word) {
-        // Zero Flag: Set if the lower 8 bits of the result are zero
-        self.z = (result & 0xFF) == 0;
+    fn update_status_flags(&mut self, flags: Byte, result: Word, value: Option<Byte>) {
         // Negative Flag: Set if bit 7 of the result is set
-        self.n = (result & 0x80) != 0;
-        // Carry Flag: Set if the 16-but result is greater then 255
-        self.c = result > 0xFF;
-    }
+        if flags & UpdateStatusFlag::N as Byte != 0 {
+            self.n = (result & 0x80) != 0;
+        }
 
-    fn status_flag_v(&mut self, result: Word, operand: Byte) {
+        if flags & UpdateStatusFlag::Z as Byte != 0 {
+            self.z = (result & 0xFF) == 0;
+        }
+
+        // Carry Flag: Set if the 16-but result is greater then 255
+        if flags & UpdateStatusFlag::C as Byte != 0 {
+            self.c = result > 0xFF;
+        }
+
         // Overflow Flag: Set if the sign of the result is different from the sign of the accumulator
         // and the sign of the operand
-        let result = result as Byte;
-        self.v = (self.a ^ result) & (operand ^ result) & 0x80 != 0;
-    }
-
-    fn asl_status(&mut self, result: Word) {
-        self.status_flag_nzc(result);
-    }
-
-    /// Update status flags after ADC instruction
-    fn adc_status(&mut self, result: Word, operand: Byte) {
-        self.status_flag_nzc(result);
-        self.status_flag_v(result, operand);
-    }
-
-    /// Update status flags after LDA, LDX, LDY instruction(s)
-    fn ld_status(&mut self, value: Byte) {
-        self.z = value == 0;
-        self.n = (value << 7) > 0;
+        if flags & UpdateStatusFlag::V as Byte != 0 {
+            let value = value.expect("Value is required for V flag");
+            let result = result as Byte;
+            self.v = (self.a ^ result) & (value ^ result) & 0x80 != 0;
+        }
     }
 }
 
@@ -667,14 +861,24 @@ mod tests {
     fn status_flags_nzc() {
         let (mut cpu, mut memory) = init();
 
-        cpu.status_flag_nzc(0xFFFF);
+        cpu.update_status_flags(
+            UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+            0xFFFF,
+            None,
+        );
+
         assert!(cpu.n);
         assert!(!cpu.z);
         assert!(cpu.c);
 
         cpu.reset(&mut memory);
 
-        cpu.status_flag_nzc(0x0000);
+        cpu.update_status_flags(
+            UpdateStatusFlag::N | UpdateStatusFlag::Z | UpdateStatusFlag::C,
+            0x0000,
+            None,
+        );
+
         assert!(!cpu.n);
         assert!(cpu.z);
         assert!(!cpu.c);
@@ -686,7 +890,7 @@ mod tests {
 
         // 0x40 + 0x40 = 0x80 - overflow
         cpu.a = 0x40;
-        cpu.status_flag_v(0xFF, 0x40);
+        cpu.update_status_flags(UpdateStatusFlag::V as Byte, 0xFF, Some(0x40));
 
         assert!(cpu.v);
 
@@ -694,7 +898,7 @@ mod tests {
 
         // 0xF0 + 0x0F = 0xFF - no overflow (because 7-th bit of A is 1)
         cpu.a = 0xF0;
-        cpu.status_flag_v(0xFF, 0xF0);
+        cpu.update_status_flags(UpdateStatusFlag::V as Byte, 0xFF, Some(0xF0));
 
         assert!(!cpu.v);
     }
@@ -703,7 +907,7 @@ mod tests {
     fn inst_adc_im() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_ADC_IM);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_IM);
         memory.write_byte(OPERAND_1_ADDR, 0xF0);
 
         cpu.a = 0x0E;
@@ -721,7 +925,7 @@ mod tests {
     #[test]
     fn inst_adc_zp() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_ZP);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_ZP);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x0001, 0xF0);
 
@@ -740,7 +944,7 @@ mod tests {
     #[test]
     fn inst_adc_zpx() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_ZPX);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_ZPX);
 
         // Zero Page + X Offset: 0x01 + 0x01 = 0x02
         memory.write_byte(OPERAND_1_ADDR, 0x01);
@@ -763,7 +967,7 @@ mod tests {
     #[test]
     fn inst_adc_a() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_A);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_A);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
 
@@ -783,7 +987,7 @@ mod tests {
     #[test]
     fn inst_adc_ax() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_AX);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_AX);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         cpu.x = 0x01;
@@ -804,7 +1008,7 @@ mod tests {
     #[test]
     fn inst_adc_ay() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_AY);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_AY);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         cpu.y = 0x01;
@@ -825,7 +1029,7 @@ mod tests {
     #[test]
     fn inst_adc_ix() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_IX);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_IX);
 
         // Indirect Addressing: 0x01 + 0x01 = 0x02
         memory.write_byte(OPERAND_1_ADDR, 0x01);
@@ -852,7 +1056,7 @@ mod tests {
     #[test]
     fn inst_adc_iy() {
         let (mut cpu, mut memory) = init();
-        memory.write_byte(OPCODE_ADDR, INS_ADC_IY);
+        memory.write_byte(OPCODE_ADDR, INST_ADC_IY);
 
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x0001, 0x03);
@@ -878,7 +1082,7 @@ mod tests {
     fn inst_asl_ac() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_ASL_AC);
+        memory.write_byte(OPCODE_ADDR, INST_ASL_AC);
         cpu.a = 0x7F;
         cpu.exec(2, &mut memory);
 
@@ -889,10 +1093,77 @@ mod tests {
     }
 
     #[test]
+    fn inst_asl_zp() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_ASL_ZP);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x0001, 0x7F);
+        cpu.exec(5, &mut memory);
+
+        assert_eq!(memory.read_byte(0x0001), 0xFE);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+        assert!(!cpu.c);
+    }
+
+    #[test]
+    fn inst_asl_zpx() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_ASL_ZPX);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x02, 0x7F);
+        cpu.x = 0x01;
+
+        cpu.exec(6, &mut memory);
+
+        assert_eq!(memory.read_byte(0x02), 0xFE);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+        assert!(!cpu.c);
+    }
+
+    #[test]
+    fn inst_asl_a() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_ASL_A);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1234, 0x7F);
+
+        cpu.exec(6, &mut memory);
+
+        assert_eq!(memory.read_byte(0x1234), 0xFE);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+        assert!(!cpu.c);
+    }
+
+    #[test]
+    fn inst_asl_ax() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_ASL_AX);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1235, 0x7F);
+        cpu.x = 0x01;
+
+        cpu.exec(7, &mut memory);
+
+        assert_eq!(memory.read_byte(0x1235), 0xFE);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+        assert!(!cpu.c);
+    }
+
+    #[test]
     fn inst_lda_im() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_IM);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_IM);
         memory.write_byte(OPERAND_1_ADDR, 0x0F);
 
         let cycles = cpu.exec(2, &mut memory);
@@ -902,10 +1173,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_zp() {
+    fn inst_lda_zp() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_ZP);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_ZP);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x0001, 0x0F);
 
@@ -916,10 +1187,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_zpx() {
+    fn inst_lda_zpx() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_ZPX);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_ZPX);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x02, 0x0F);
         cpu.x = 0x01;
@@ -931,10 +1202,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_zpx_overflow() {
+    fn inst_lda_zpx_overflow() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_ZPX);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_ZPX);
         memory.write_byte(OPERAND_1_ADDR, 0xFF);
         memory.write_byte(0x7F, 0x0F);
         cpu.x = 0x80;
@@ -946,10 +1217,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_a() {
+    fn inst_lda_a() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_A);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_A);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1234, 0x0F);
@@ -961,10 +1232,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_ax() {
+    fn inst_lda_ax() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_AX);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_AX);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1235, 0x0F);
@@ -977,10 +1248,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_ay() {
+    fn inst_lda_ay() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_AY);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_AY);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1235, 0x0F);
@@ -993,10 +1264,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_ix() {
+    fn inst_lda_ix() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_IX);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_IX);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         cpu.x = 0x33;
 
@@ -1011,10 +1282,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_iy() {
+    fn inst_lda_iy() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_IY);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_IY);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x0001, 0x01);
         memory.write_byte(0x0002, 0x02);
@@ -1029,10 +1300,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_zero_flag() {
+    fn inst_lda_zero_flag() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_IM);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_IM);
         memory.write_byte(OPERAND_1_ADDR, 0x0);
         let cycles = cpu.exec(2, &mut memory);
 
@@ -1041,10 +1312,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_lda_negative_flag() {
+    fn inst_lda_negative_flag() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDA_IM);
+        memory.write_byte(OPCODE_ADDR, INST_LDA_IM);
         memory.write_byte(OPERAND_1_ADDR, 0xFF);
         let cycles = cpu.exec(2, &mut memory);
 
@@ -1053,10 +1324,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldx_im() {
+    fn inst_ldx_im() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDX_IM);
+        memory.write_byte(OPCODE_ADDR, INST_LDX_IM);
         memory.write_byte(OPERAND_1_ADDR, 0x0F);
         let cycles = cpu.exec(2, &mut memory);
 
@@ -1065,10 +1336,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldx_zp() {
+    fn inst_ldx_zp() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDX_ZP);
+        memory.write_byte(OPCODE_ADDR, INST_LDX_ZP);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x0001, 0x0F);
 
@@ -1079,10 +1350,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldx_zpy() {
+    fn inst_ldx_zpy() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDX_ZPY);
+        memory.write_byte(OPCODE_ADDR, INST_LDX_ZPY);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x02, 0x0F);
         cpu.y = 0x01;
@@ -1094,10 +1365,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldx_a() {
+    fn inst_ldx_a() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDX_A);
+        memory.write_byte(OPCODE_ADDR, INST_LDX_A);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1234, 0x0F);
@@ -1109,10 +1380,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldx_ay() {
+    fn inst_ldx_ay() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDX_AY);
+        memory.write_byte(OPCODE_ADDR, INST_LDX_AY);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1235, 0x0F);
@@ -1125,10 +1396,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldy_im() {
+    fn inst_ldy_im() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDY_IM);
+        memory.write_byte(OPCODE_ADDR, INST_LDY_IM);
         memory.write_byte(OPERAND_1_ADDR, 0x0F);
         let cycles = cpu.exec(2, &mut memory);
 
@@ -1137,10 +1408,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldy_lz() {
+    fn inst_ldy_lz() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDY_LZ);
+        memory.write_byte(OPCODE_ADDR, INST_LDY_LZ);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x0001, 0x0F);
 
@@ -1151,10 +1422,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldy_lzx() {
+    fn inst_ldy_lzx() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDY_LZX);
+        memory.write_byte(OPCODE_ADDR, INST_LDY_LZX);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x02, 0x0F);
         cpu.x = 0x01;
@@ -1166,10 +1437,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldy_a() {
+    fn inst_ldy_a() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDY_A);
+        memory.write_byte(OPCODE_ADDR, INST_LDY_A);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1234, 0x0F);
@@ -1181,10 +1452,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_ldy_ax() {
+    fn inst_ldy_ax() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_LDY_AX);
+        memory.write_byte(OPCODE_ADDR, INST_LDY_AX);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         memory.write_byte(0x1235, 0x0F);
@@ -1197,10 +1468,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_zp() {
+    fn inst_sta_zp() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_ZP);
+        memory.write_byte(OPCODE_ADDR, INST_STA_ZP);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         cpu.a = 0x0E;
 
@@ -1211,10 +1482,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_zpx() {
+    fn inst_sta_zpx() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_ZPX);
+        memory.write_byte(OPCODE_ADDR, INST_STA_ZPX);
         memory.write_byte(OPERAND_1_ADDR, 0x0E);
         cpu.x = 0x01;
         cpu.a = 0x0E;
@@ -1226,10 +1497,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_a() {
+    fn inst_sta_a() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_A);
+        memory.write_byte(OPCODE_ADDR, INST_STA_A);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         cpu.a = 0xE;
@@ -1241,10 +1512,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_ax() {
+    fn inst_sta_ax() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_AX);
+        memory.write_byte(OPCODE_ADDR, INST_STA_AX);
 
         // Mem address: 0x1235
         memory.write_byte(OPERAND_1_ADDR, 0x12);
@@ -1258,10 +1529,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_ay() {
+    fn inst_sta_ay() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_AY);
+        memory.write_byte(OPCODE_ADDR, INST_STA_AY);
 
         // Mem address: 0x1235
         memory.write_byte(OPERAND_1_ADDR, 0x12);
@@ -1275,10 +1546,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_ix() {
+    fn inst_sta_ix() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_IX);
+        memory.write_byte(OPCODE_ADDR, INST_STA_IX);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         cpu.x = 0x33;
 
@@ -1293,10 +1564,10 @@ mod tests {
     }
 
     #[test]
-    fn ins_sta_iy() {
+    fn inst_sta_iy() {
         let (mut cpu, mut memory) = init();
 
-        memory.write_byte(OPCODE_ADDR, INS_STA_IY);
+        memory.write_byte(OPCODE_ADDR, INST_STA_IY);
         memory.write_byte(OPERAND_1_ADDR, 0x12);
         memory.write_byte(OPERAND_2_ADDR, 0x34);
         cpu.y = 0x01;
