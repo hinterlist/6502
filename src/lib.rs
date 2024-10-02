@@ -13,6 +13,13 @@ pub const ENTRY_POINT: Word = 0x1000;
 
 // AND Memory with Accumulator
 const INST_AND_IM: Byte = 0x29;
+const INST_AND_ZP: Byte = 0x25;
+const INST_AND_ZPX: Byte = 0x35;
+const INST_AND_A: Byte = 0x2D;
+const INST_AND_AX: Byte = 0x3D;
+const INST_AND_AY: Byte = 0x39;
+const INST_AND_IX: Byte = 0x21;
+const INST_AND_IY: Byte = 0x31;
 
 // ADC - Add with Carry
 const INST_ADC_IM: Byte = 0x69;
@@ -364,9 +371,11 @@ impl Cpu {
 
     /// The Y register indexed absolute addressing mode is the same as the previous mode only with the contents
     /// of the Y register added to the 16 bit address from the instruction.
-    fn addr_absolute_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_absolute_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.addr_absolute_y(cycles, memory);
-        self.read_byte(cycles, addr, memory)
+        let value = self.read_byte(cycles, addr, memory);
+
+        (addr, value)
     }
 
     fn addr_absolute_y_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
@@ -377,6 +386,7 @@ impl Cpu {
     /// Indexed indirect addressing is normally used in conjunction with a table of address held on zero page.
     /// The address of the table is taken from the instruction and the X register added to it (with zero page wrap around)
     /// to give the location of the least significant byte of the target address.
+    /// TODO: Replace with addr_zero_page
     fn addr_indirect(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
         self.fetch_byte(cycles, memory)
     }
@@ -411,9 +421,11 @@ impl Cpu {
         target_addr + (self.y as Word)
     }
 
-    fn addr_indirect_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+    fn addr_indirect_y_read(&mut self, cycles: &mut u32, memory: &mut Mem) -> (Word, Byte) {
         let addr = self.addr_indirect_y(cycles, memory);
-        self.read_byte(cycles, addr, memory)
+        let value = self.read_byte(cycles, addr, memory);
+
+        (addr, value)
     }
 
     fn addr_indirect_y_write(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
@@ -437,6 +449,76 @@ impl Cpu {
                 // AND Memory with Accumulator
                 INST_AND_IM => {
                     let value = self.addr_immediate(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_ZP => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_ZPX => {
+                    let (_, value) = self.addr_zero_page_x_read(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_AX => {
+                    let (_, value) = self.addr_absolute_x_read(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_AY => {
+                    let (_, value) = self.addr_absolute_y_read(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_IX => {
+                    let (_, value) = self.addr_indirect_x_read(&mut cycles, memory);
+                    self.a &= value;
+
+                    self.update_status_flags(
+                        UpdateStatusFlag::N | UpdateStatusFlag::Z,
+                        self.a as Word,
+                        None,
+                    );
+                }
+                INST_AND_IY => {
+                    let (_, value) = self.addr_indirect_y_read(&mut cycles, memory);
                     self.a &= value;
 
                     self.update_status_flags(
@@ -482,7 +564,7 @@ impl Cpu {
                     self.a = result as Byte;
                 }
                 INST_ADC_AY => {
-                    let value = self.addr_absolute_y_read(&mut cycles, memory);
+                    let (_, value) = self.addr_absolute_y_read(&mut cycles, memory);
                     let result = self.a as Word + value as Word + self.c as Word;
 
                     self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
@@ -496,7 +578,7 @@ impl Cpu {
                     self.a = result as Byte;
                 }
                 INST_ADC_IY => {
-                    let value = self.addr_indirect_y_read(&mut cycles, memory);
+                    let (_, value) = self.addr_indirect_y_read(&mut cycles, memory);
                     let result = self.a as Word + value as Word + self.c as Word;
 
                     self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
@@ -619,7 +701,9 @@ impl Cpu {
                     );
                 }
                 INST_LDA_AY => {
-                    self.a = self.addr_absolute_y_read(&mut cycles, memory);
+                    let (_, value) = self.addr_absolute_y_read(&mut cycles, memory);
+
+                    self.a = value;
                     self.update_status_flags(
                         UpdateStatusFlag::N | UpdateStatusFlag::Z,
                         self.a as Word,
@@ -637,7 +721,9 @@ impl Cpu {
                     );
                 }
                 INST_LDA_IY => {
-                    self.a = self.addr_indirect_y_read(&mut cycles, memory);
+                    let (_, value) = self.addr_indirect_y_read(&mut cycles, memory);
+
+                    self.a = value;
                     self.update_status_flags(
                         UpdateStatusFlag::N | UpdateStatusFlag::Z,
                         self.a as Word,
@@ -682,7 +768,9 @@ impl Cpu {
                     );
                 }
                 INST_LDX_AY => {
-                    self.x = self.addr_absolute_y_read(&mut cycles, memory);
+                    let (_, value) = self.addr_absolute_y_read(&mut cycles, memory);
+
+                    self.x = value;
                     self.update_status_flags(
                         UpdateStatusFlag::N | UpdateStatusFlag::Z,
                         self.x as Word,
@@ -901,6 +989,143 @@ mod tests {
         cpu.update_status_flags(UpdateStatusFlag::V as Byte, 0xFF, Some(0xF0));
 
         assert!(!cpu.v);
+    }
+
+    #[test]
+    fn inst_and_im() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_IM);
+        memory.write_byte(OPERAND_1_ADDR, 0b1010_1010);
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_zp() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_ZP);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x01, 0b1010_1010);
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_zpx() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_ZPX);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x02, 0b1010_1010);
+        cpu.x = 0x01;
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(4, &mut memory);
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_a() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_A);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1234, 0b1010_1010);
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(4, &mut memory);
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_ax() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_AX);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1235, 0b1010_1010);
+
+        cpu.x = 0x01;
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(4, &mut memory);
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_ay() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_AY);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1235, 0b1010_1010);
+
+        cpu.y = 0x01;
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(4, &mut memory);
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_ix() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_IX);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x0002, 0x12);
+        memory.write_byte(0x0003, 0x34);
+        memory.write_byte(0x1234, 0b1010_1010);
+
+        cpu.x = 0x01;
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(6, &mut memory);
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
+    }
+
+    #[test]
+    fn inst_and_iy() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_AND_IY);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x0001, 0x12);
+        memory.write_byte(0x0002, 0x34);
+        memory.write_byte(0x1235, 0b1010_1010);
+
+        cpu.y = 0x01;
+        cpu.a = 0b1100_1100;
+
+        cpu.exec(5, &mut memory);
+        assert_eq!(cpu.a, 0b1000_1000);
+        assert!(cpu.n);
+        assert!(!cpu.z);
     }
 
     #[test]
