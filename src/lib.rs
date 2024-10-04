@@ -11,16 +11,6 @@ pub const ENTRY_POINT: Word = 0x1000;
 /// Instruction reference:
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
 
-// AND Memory with Accumulator
-const INST_AND_IM: Byte = 0x29;
-const INST_AND_ZP: Byte = 0x25;
-const INST_AND_ZPX: Byte = 0x35;
-const INST_AND_A: Byte = 0x2D;
-const INST_AND_AX: Byte = 0x3D;
-const INST_AND_AY: Byte = 0x39;
-const INST_AND_IX: Byte = 0x21;
-const INST_AND_IY: Byte = 0x31;
-
 // ADC - Add with Carry
 const INST_ADC_IM: Byte = 0x69;
 const INST_ADC_ZP: Byte = 0x65;
@@ -31,12 +21,25 @@ const INST_ADC_AY: Byte = 0x79;
 const INST_ADC_IX: Byte = 0x61;
 const INST_ADC_IY: Byte = 0x71;
 
+// AND Memory with Accumulator
+const INST_AND_IM: Byte = 0x29;
+const INST_AND_ZP: Byte = 0x25;
+const INST_AND_ZPX: Byte = 0x35;
+const INST_AND_A: Byte = 0x2D;
+const INST_AND_AX: Byte = 0x3D;
+const INST_AND_AY: Byte = 0x39;
+const INST_AND_IX: Byte = 0x21;
+const INST_AND_IY: Byte = 0x31;
+
 // ASL - Shift Left One Bit (Memory or Accumulator)
 const INST_ASL_AC: Byte = 0x0A;
 const INST_ASL_ZP: Byte = 0x06;
 const INST_ASL_ZPX: Byte = 0x16;
 const INST_ASL_A: Byte = 0x0E;
 const INST_ASL_AX: Byte = 0x1E;
+
+// BCC - Branch on Carry Clear
+const INST_BCC: Byte = 0x90;
 
 // LDA - Load Accumulator
 const INST_LDA_IM: Byte = 0xA9;
@@ -237,19 +240,19 @@ impl Cpu {
     }
 
     /// Add two bytes ignoring overflow
-    fn overflowing_add_byte(&mut self, cycles: &mut u32, a: Byte, b: Byte) -> Byte {
-        let (data, _) = a.overflowing_add(b);
-        *cycles -= 1;
+    // fn overflowing_add_byte(&mut self, cycles: &mut u32, a: Byte, b: Byte) -> Byte {
+    //     let (data, _) = a.overflowing_add(b);
+    //     *cycles -= 1;
 
-        data
-    }
+    //     data
+    // }
 
     /// Add two words ignoring overflow
     /// TODO: Add carry flag?
-    fn overflowing_add_word(&mut self, a: Word, b: Word) -> Word {
-        let (data, _) = a.overflowing_add(b);
-        data
-    }
+    // fn overflowing_add_word(&mut self, a: Word, b: Word) -> Word {
+    //     let (data, _) = a.overflowing_add(b);
+    //     data
+    // }
 
     /// Addressing Modes
 
@@ -289,7 +292,9 @@ impl Cpu {
     /// and not $017F.
     fn addr_zero_page_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.addr_zero_page(cycles, memory);
-        let addr = self.overflowing_add_byte(cycles, addr, self.x);
+        let addr = addr.wrapping_add(self.x);
+
+        *cycles -= 1;
 
         addr as Word
     }
@@ -308,7 +313,9 @@ impl Cpu {
 
     fn addr_zero_page_y(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.addr_zero_page(cycles, memory);
-        let addr = self.overflowing_add_byte(cycles, addr, self.y);
+        let addr = addr.wrapping_add(self.y);
+
+        *cycles -= 1;
 
         addr as Word
     }
@@ -334,7 +341,7 @@ impl Cpu {
     /// contains $92 then an STA $2000,X instruction will store the accumulator at $2092 (e.g. $2000 + $92).
     fn addr_absolute_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.addr_absolute(cycles, memory);
-        self.overflowing_add_word(addr, self.x as Word)
+        addr.wrapping_add(self.x as Word)
     }
 
     /// Read byte from memory referenced by address specified in next byte pointed by PC registry
@@ -366,7 +373,7 @@ impl Cpu {
 
     fn addr_absolute_y(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.addr_absolute(cycles, memory);
-        self.overflowing_add_word(addr, self.y as Word)
+        addr.wrapping_add(self.y as Word)
     }
 
     /// The Y register indexed absolute addressing mode is the same as the previous mode only with the contents
@@ -393,7 +400,9 @@ impl Cpu {
 
     fn addr_indirect_x(&mut self, cycles: &mut u32, memory: &mut Mem) -> Word {
         let addr = self.addr_indirect(cycles, memory);
-        let addr = self.overflowing_add_byte(cycles, addr, self.x) as Word;
+        let addr = addr.wrapping_add(self.x) as Word;
+
+        *cycles -= 1;
 
         self.read_word(cycles, addr, memory)
     }
@@ -446,6 +455,63 @@ impl Cpu {
             let instruction = self.fetch_byte(&mut cycles, memory);
 
             match instruction {
+                // ADC - Add with Carry
+                INST_ADC_IM => {
+                    let value = self.addr_immediate(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_ZP => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_ZPX => {
+                    let (_, value) = self.addr_zero_page_x_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_AX => {
+                    let (_, value) = self.addr_absolute_x_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_AY => {
+                    let (_, value) = self.addr_absolute_y_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_IX => {
+                    let (_, value) = self.addr_indirect_x_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
+                INST_ADC_IY => {
+                    let (_, value) = self.addr_indirect_y_read(&mut cycles, memory);
+                    let result = self.a as Word + value as Word + self.c as Word;
+
+                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
+                    self.a = result as Byte;
+                }
                 // AND Memory with Accumulator
                 INST_AND_IM => {
                     let value = self.addr_immediate(&mut cycles, memory);
@@ -527,63 +593,6 @@ impl Cpu {
                         None,
                     );
                 }
-                // ADC - Add with Carry
-                INST_ADC_IM => {
-                    let value = self.addr_immediate(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_ZP => {
-                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_ZPX => {
-                    let (_, value) = self.addr_zero_page_x_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_A => {
-                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_AX => {
-                    let (_, value) = self.addr_absolute_x_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_AY => {
-                    let (_, value) = self.addr_absolute_y_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_IX => {
-                    let (_, value) = self.addr_indirect_x_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
-                INST_ADC_IY => {
-                    let (_, value) = self.addr_indirect_y_read(&mut cycles, memory);
-                    let result = self.a as Word + value as Word + self.c as Word;
-
-                    self.update_status_flags(UpdateStatusFlag::All as Byte, result, Some(value));
-                    self.a = result as Byte;
-                }
                 // ASL Shift Left One Bit (Memory or Accumulator)
                 INST_ASL_AC => {
                     let result: Word = (self.a as Word) << 1;
@@ -649,6 +658,21 @@ impl Cpu {
                         None,
                     );
                     self.write_byte(&mut cycles, memory, addr, result as Byte);
+                }
+                // BCC - Branch on Carry Clear
+                INST_BCC => {
+                    let offset = self.addr_immediate(&mut cycles, memory);
+                    if self.c {
+                        cycles -= 1;
+
+                        let old_pc = self.pc;
+                        self.pc = self.pc.wrapping_add(offset as Word);
+
+                        // Check for page boundary crossed
+                        if (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                            cycles -= 1;
+                        }
+                    }
                 }
                 // LDA - Load Accumulator
                 INST_LDA_IM => {
@@ -934,6 +958,8 @@ mod tests {
     const OPCODE_ADDR: Word = ENTRY_POINT;
     const OPERAND_1_ADDR: Word = ENTRY_POINT + 1;
     const OPERAND_2_ADDR: Word = OPERAND_1_ADDR + 1;
+
+    use std::mem;
 
     use super::*;
 
@@ -1382,6 +1408,41 @@ mod tests {
         assert!(cpu.n);
         assert!(!cpu.z);
         assert!(!cpu.c);
+    }
+
+    #[test]
+    fn inst_bcc() {
+        let (mut cpu, mut memory) = init();
+
+        // Test branch taken
+        memory.write_byte(OPCODE_ADDR, INST_BCC);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.c = true;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.pc, ENTRY_POINT + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test branch not taken
+        memory.write_byte(OPCODE_ADDR, INST_BCC);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.c = false;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.pc, ENTRY_POINT + 0x02);
+
+        // Test page boundary crossed
+        memory.write_byte(OPCODE_ADDR, INST_BCC);
+        memory.write_byte(OPERAND_1_ADDR, 0xFF);
+        cpu.c = true;
+
+        cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.pc, ENTRY_POINT + 0x2 + 0xFF); // 0x2 is the size of the instruction
     }
 
     #[test]
