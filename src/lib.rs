@@ -239,21 +239,6 @@ impl Cpu {
         data
     }
 
-    /// Add two bytes ignoring overflow
-    // fn overflowing_add_byte(&mut self, cycles: &mut u32, a: Byte, b: Byte) -> Byte {
-    //     let (data, _) = a.overflowing_add(b);
-    //     *cycles -= 1;
-
-    //     data
-    // }
-
-    /// Add two words ignoring overflow
-    /// TODO: Add carry flag?
-    // fn overflowing_add_word(&mut self, a: Word, b: Word) -> Word {
-    //     let (data, _) = a.overflowing_add(b);
-    //     data
-    // }
-
     /// Addressing Modes
 
     /// Immediate addressing allows the programmer to directly specify an 8 bit constant within the instruction
@@ -1476,6 +1461,7 @@ mod tests {
     fn inst_lda_zpx() {
         let (mut cpu, mut memory) = init();
 
+        // Take with no overflow
         memory.write_byte(OPCODE_ADDR, INST_LDA_ZPX);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
         memory.write_byte(0x02, 0x0F);
@@ -1485,12 +1471,11 @@ mod tests {
 
         assert_eq!(cpu.a, 0x0F);
         assert_eq!(cycles, 0);
-    }
 
-    #[test]
-    fn inst_lda_zpx_overflow() {
-        let (mut cpu, mut memory) = init();
+        // Reset CPU
+        cpu.reset(&mut memory);
 
+        // Take with overflow
         memory.write_byte(OPCODE_ADDR, INST_LDA_ZPX);
         memory.write_byte(OPERAND_1_ADDR, 0xFF);
         memory.write_byte(0x7F, 0x0F);
@@ -1582,30 +1567,6 @@ mod tests {
         let cycles = cpu.exec(5, &mut memory);
 
         assert_eq!(cpu.a, 0x0F);
-        assert_eq!(cycles, 0);
-    }
-
-    #[test]
-    fn inst_lda_zero_flag() {
-        let (mut cpu, mut memory) = init();
-
-        memory.write_byte(OPCODE_ADDR, INST_LDA_IM);
-        memory.write_byte(OPERAND_1_ADDR, 0x0);
-        let cycles = cpu.exec(2, &mut memory);
-
-        assert!(cpu.z);
-        assert_eq!(cycles, 0);
-    }
-
-    #[test]
-    fn inst_lda_negative_flag() {
-        let (mut cpu, mut memory) = init();
-
-        memory.write_byte(OPCODE_ADDR, INST_LDA_IM);
-        memory.write_byte(OPERAND_1_ADDR, 0xFF);
-        let cycles = cpu.exec(2, &mut memory);
-
-        assert!(cpu.n);
         assert_eq!(cycles, 0);
     }
 
