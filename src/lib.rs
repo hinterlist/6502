@@ -3,13 +3,26 @@ use std::ops::BitOr;
 type Byte = u8; // 8-bit value
 type Word = u16; // 16-bit value
 
+// Address of the reset vector in memory
+// This is the place where CPU will readd address of Instruction Vector
 pub const RESET_VEC: Word = 0xFFFC;
-pub const ENTRY_POINT: Word = 0x1000;
+
+// Address of the first instruction in memory
+pub const INSTRUCTION_VEC: Word = 0x1000;
+
+// Address of the interrupt vector in memory
+pub const INTERRUPT_VEC: Word = 0xFFFE;
+
+// Address of the stack in memory
+pub const STACK_VEC: Word = 0x0100;
 
 /// CPU Instructions
 ///
 /// Instruction reference:
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
+
+// TOTAL: 56 instructions
+// READY: 16 instructions
 
 // ADC - Add with Carry
 const INST_ADC_IM: Byte = 0x69;
@@ -40,6 +53,28 @@ const INST_ASL_AX: Byte = 0x1E;
 
 // BCC - Branch on Carry Clear
 const INST_BCC: Byte = 0x90;
+
+// BCS - Branch on Carry Set
+const INST_BCS: Byte = 0xB0;
+
+// BEQ - Branch on Result Zero
+const INST_BEQ: Byte = 0xF0;
+
+// BIT - Test Bits in Memory with Accumulator
+const INST_BIT_ZP: Byte = 0x24;
+const INST_BIT_A: Byte = 0x2C;
+
+// BMI - Branch on Result Minus
+const INST_BMI: Byte = 0x30;
+
+// BNE - Branch on Result not Zero
+const INST_BNE: Byte = 0xD0;
+
+// BPL - Branch on Result Plus
+const INST_BPL: Byte = 0x10;
+
+// BRK - Force Break
+const INST_BRK: Byte = 0x00;
 
 // LDA - Load Accumulator
 const INST_LDA_IM: Byte = 0xA9;
@@ -77,19 +112,20 @@ const INST_STA_IY: Byte = 0x91;
 #[derive(Default)]
 pub struct Cpu {
     pc: Word, // Program counter register
-    sp: Word, // Stack pointer register (256kb of stack start from 0x0100)
+    sp: Byte, // Stack pointer register (256kb of stack start from 0x01FF and goes down to 0x0100)
     a: Byte,  // Accumulator
     x: Byte,  // Index register X
     y: Byte,  // Index register Y
 
-    // Processor status
-    c: bool, // Carry Flag - The carry flag is set if the last operation caused an overflow from bit 7 of the result or an underflow from bit 0. This condition is set during arithmetic, comparison and during logical shifts. It can be explicitly set using the ‘Set Carry Flag’ (SEC) instruction and cleared with ‘Clear Carry Flag’ (CLC).
-    z: bool, // Zero Flag - The zero flag is set if the result of the last operation was zero.
-    i: bool, // Interrupt Disable - The interrupt disable flag is set if the program has executed a ‘Set Interrupt Disable’ (SEI) instruction. While this flag is set the processor will not respond to interrupts from devices until it is cleared by a ‘Clear Interrupt Disable’ (CLI) instruction.
-    d: bool, // Decimal Mode - While the decimal mode flag is set the processor will obey the rules of Binary Coded Decimal (BCD) arithmetic during addition and subtraction. The flag can be explicitly set using ‘Set Decimal Flag’ (SED) and cleared with ‘Clear Decimal Flag’ (CLD).
-    b: bool, // Break Command - The break command bit is set when a BRK instruction has been executed and an interrupt has been generated to process it.
-    v: bool, // Overflow Flag - The overflow flag is set during arithmetic operations if the result has yielded an invalid 2’s complement result (e.g. adding to positive numbers and ending up with a negative result: 64 + 64 => -128). It is determined by looking at the carry between bits 6 and 7 and between bit 7 and the carry flag.
-    n: bool, // Negative Flag - The negative flag is set if the result of the last operation had bit 7 set to a one.
+    // Status Register Flags (bit 0 to bit 7)
+    c: bool, // 0: Carry Flag - The carry flag is set if the last operation caused an overflow from bit 7 of the result or an underflow from bit 0. This condition is set during arithmetic, comparison and during logical shifts. It can be explicitly set using the ‘Set Carry Flag’ (SEC) instruction and cleared with ‘Clear Carry Flag’ (CLC).
+    n: bool, // 1: Negative Flag - The negative flag is set if the result of the last operation had bit 7 set to a one.
+    z: bool, // 2: Zero Flag - The zero flag is set if the result of the last operation was zero.
+    i: bool, // 3: Interrupt Disable - The interrupt disable flag is set if the program has executed a ‘Set Interrupt Disable’ (SEI) instruction. While this flag is set the processor will not respond to interrupts from devices until it is cleared by a ‘Clear Interrupt Disable’ (CLI) instruction.
+    d: bool, // 4: Decimal Mode - While the decimal mode flag is set the processor will obey the rules of Binary Coded Decimal (BCD) arithmetic during addition and subtraction. The flag can be explicitly set using ‘Set Decimal Flag’ (SED) and cleared with ‘Clear Decimal Flag’ (CLD).
+    // 5: Ignored
+    b: bool, // 6: Break Command - The break command bit is set when a BRK instruction has been executed and an interrupt has been generated to process it.
+    v: bool, // 7: Overflow Flag - The overflow flag is set during arithmetic operations if the result has yielded an invalid 2’s complement result (e.g. adding to positive numbers and ending up with a negative result: 64 + 64 => -128). It is determined by looking at the carry between bits 6 and 7 and between bit 7 and the carry flag.
 }
 
 #[repr(u8)]
@@ -153,12 +189,12 @@ impl Cpu {
     // Dump stack from current stack pointer, up to 0x0100
     pub fn dump_stack(&self, memory: &Mem) {
         println!("Stack:");
-        if self.sp == 0x0100 {
+        if self.sp == 0 {
             println!("  Stack is empty");
             return;
         }
 
-        for addr in (self.sp..0x100).step_by(0x10) {
+        for addr in ((STACK_VEC + 0xFF)..(STACK_VEC + (self.sp as Word))).step_by(0x10) {
             let value = (addr..addr + 0x10)
                 .map(|addr| format!("0x{:0>2X}", memory.read_byte(addr)))
                 .collect::<Vec<_>>()
@@ -170,7 +206,7 @@ impl Cpu {
 
     pub fn reset(&mut self, memory: &mut Mem) {
         self.pc = 0x0000;
-        self.sp = 0x0100;
+        self.sp = 0xFF;
 
         // clear all flags
         self.c = false;
@@ -190,8 +226,8 @@ impl Cpu {
         memory.init();
 
         // Set reset vector (the place where CPU will jump after reset)
-        memory.write_byte(0xFFFC, (ENTRY_POINT << 8) as Byte);
-        memory.write_byte(0xFFFD, (ENTRY_POINT >> 8) as Byte);
+        memory.write_byte(RESET_VEC, (INSTRUCTION_VEC << 8) as Byte);
+        memory.write_byte(RESET_VEC + 1, (INSTRUCTION_VEC >> 8) as Byte);
     }
 
     /// fetch one byte from memory using address from PC register and increase program counter
@@ -237,6 +273,24 @@ impl Cpu {
         *cycles -= 2;
 
         data
+    }
+
+    // Stack operations
+
+    // Push value to stack
+    pub fn push_stack(&mut self, cycles: &mut u32, memory: &mut Mem, value: Byte) {
+        memory.write_byte(STACK_VEC + (self.sp as Word), value);
+        self.sp = self.sp.wrapping_sub(1);
+        *cycles -= 1;
+    }
+
+    // Pop value from stack
+    pub fn pull_stack(&mut self, cycles: &mut u32, memory: &mut Mem) -> Byte {
+        self.sp = self.sp.wrapping_add(1);
+        let value = memory.read_byte(STACK_VEC + (self.sp as Word));
+        *cycles -= 1;
+
+        value
     }
 
     /// Addressing Modes
@@ -430,9 +484,9 @@ impl Cpu {
     /// Execute instructions for next X cycles
     pub fn exec(&mut self, cycles: u32, memory: &mut Mem) -> u32 {
         // Set program counter to reset vector
-        let low_reset_vector = memory.read_byte(RESET_VEC) as Word;
-        let high_reset_vector = memory.read_byte(RESET_VEC + 1) as Word;
-        self.pc = (high_reset_vector << 8) | low_reset_vector;
+        let low_byte = memory.read_byte(RESET_VEC) as Word;
+        let high_byte = memory.read_byte(RESET_VEC + 1) as Word;
+        self.pc = (high_byte << 8) | low_byte;
 
         let mut cycles = cycles;
 
@@ -647,7 +701,7 @@ impl Cpu {
                 // BCC - Branch on Carry Clear
                 INST_BCC => {
                     let offset = self.addr_immediate(&mut cycles, memory);
-                    if self.c {
+                    if !self.c {
                         cycles -= 1;
 
                         let old_pc = self.pc;
@@ -658,6 +712,118 @@ impl Cpu {
                             cycles -= 1;
                         }
                     }
+                }
+                INST_BCS => {
+                    let offset = self.addr_immediate(&mut cycles, memory);
+                    if self.c {
+                        cycles -= 1;
+
+                        let old_pc = self.pc;
+                        self.pc = self.pc.wrapping_add(offset as Word);
+
+                        if (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                            cycles -= 1;
+                        }
+                    }
+                }
+                INST_BEQ => {
+                    let offset = self.addr_immediate(&mut cycles, memory);
+                    if self.z {
+                        cycles -= 1;
+
+                        let old_pc = self.pc;
+                        self.pc = self.pc.wrapping_add(offset as Word);
+
+                        if (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                            cycles -= 1;
+                        }
+                    }
+                }
+                // BIT - Test Bits in Memory with Accumulator
+                //
+                // bits 7 and 6 of operand are transfered to bit 7 and 6 of SR (N,V);
+                // the zero-flag is set according to the result of the operand AND
+                // the accumulator (set, if the result is zero, unset otherwise).
+                // This allows a quick check of a few bits at once without affecting
+                // any of the registers, other than the status register (SR).
+                INST_BIT_ZP => {
+                    let (_, value) = self.addr_zero_page_read(&mut cycles, memory);
+
+                    self.n = (value & 0x80) != 0;
+                    self.v = (value & 0x40) != 0;
+                    self.z = self.a & value == 0;
+                }
+                INST_BIT_A => {
+                    let (_, value) = self.addr_absolute_read(&mut cycles, memory);
+
+                    self.n = (value & 0x80) != 0;
+                    self.v = (value & 0x40) != 0;
+                    self.z = self.a & value == 0;
+                }
+                // BMI - Branch on Result Minus
+                INST_BMI => {
+                    let offset = self.addr_immediate(&mut cycles, memory);
+
+                    if self.n {
+                        cycles -= 1;
+
+                        let old_pc = self.pc;
+                        self.pc = self.pc.wrapping_add(offset as Word);
+
+                        if (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                            cycles -= 1;
+                        }
+                    }
+                }
+                // BNE - Branch on Result not Zero
+                INST_BNE => {
+                    let offset = self.addr_immediate(&mut cycles, memory);
+                    if !self.z {
+                        cycles -= 1;
+
+                        let old_pc = self.pc;
+                        self.pc = self.pc.wrapping_add(offset as Word);
+
+                        if (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                            cycles -= 1;
+                        }
+                    }
+                }
+                // BPL - Branch on Result Plus
+                INST_BPL => {
+                    let offset = self.addr_immediate(&mut cycles, memory);
+                    if !self.n {
+                        cycles -= 1;
+
+                        let old_pc = self.pc;
+                        self.pc = self.pc.wrapping_add(offset as Word);
+
+                        if (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                            cycles -= 1;
+                        }
+                    }
+                }
+                // BRK - Force Break
+                INST_BRK => {
+                    // TODO: Should be +1 or +2 ?
+                    self.pc += 1;
+
+                    // Push the program counter to the stack
+                    self.push_stack(&mut cycles, memory, (self.pc >> 8) as Byte);
+                    self.push_stack(&mut cycles, memory, self.pc as Byte);
+
+                    // Push the status register to the stack
+                    let mut status = self.status_byte();
+                    status |= 0x10; // Set break flag
+                    self.push_stack(&mut cycles, memory, status);
+
+                    // Set interrupt disable flag
+                    self.i = true;
+
+                    // Load the new program counter from the interupt vector
+                    let low_byte = self.read_byte(&mut cycles, INTERRUPT_VEC, memory);
+                    let high_byte = self.read_byte(&mut cycles, INTERRUPT_VEC + 1, memory);
+                    self.pc = (high_byte as Word) << 8 | low_byte as Word;
                 }
                 // LDA - Load Accumulator
                 INST_LDA_IM => {
@@ -889,6 +1055,18 @@ impl Cpu {
             self.v = (self.a ^ result) & (value ^ result) & 0x80 != 0;
         }
     }
+
+    // Create status byte from status flags
+    fn status_byte(&self) -> Byte {
+        (self.c as Byte)
+            | (self.z as Byte) << 1
+            | (self.i as Byte) << 2
+            | (self.d as Byte) << 3
+            | (self.b as Byte) << 4
+            | (1 << 5)
+            | (self.v as Byte) << 6
+            | (self.n as Byte) << 7
+    }
 }
 
 const MAX_MEM: usize = 1024 * 64; // 64kb of memory
@@ -940,8 +1118,8 @@ impl Mem {
 
 #[cfg(test)]
 mod tests {
-    const OPCODE_ADDR: Word = ENTRY_POINT;
-    const OPERAND_1_ADDR: Word = ENTRY_POINT + 1;
+    const OPCODE_ADDR: Word = INSTRUCTION_VEC;
+    const OPERAND_1_ADDR: Word = INSTRUCTION_VEC + 1;
     const OPERAND_2_ADDR: Word = OPERAND_1_ADDR + 1;
 
     use std::mem;
@@ -1402,11 +1580,11 @@ mod tests {
         // Test branch taken
         memory.write_byte(OPCODE_ADDR, INST_BCC);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
-        cpu.c = true;
+        cpu.c = false;
 
         cpu.exec(3, &mut memory);
 
-        assert_eq!(cpu.pc, ENTRY_POINT + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x03); // 0x2 is the size of the instruction + 0x01 offset
 
         // Reset CPU
         cpu.reset(&mut memory);
@@ -1414,20 +1592,267 @@ mod tests {
         // Test branch not taken
         memory.write_byte(OPCODE_ADDR, INST_BCC);
         memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.c = true;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x02);
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test page boundary crossed
+        memory.write_byte(OPCODE_ADDR, INST_BCC);
+        memory.write_byte(OPERAND_1_ADDR, 0xFF);
+        cpu.c = false;
+
+        cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x2 + 0xFF); // 0x2 is the size of the instruction
+    }
+
+    #[test]
+    fn inst_bcs() {
+        let (mut cpu, mut memory) = init();
+
+        // Test branch taken
+        memory.write_byte(OPCODE_ADDR, INST_BCS);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.c = true;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test branch not taken
+        memory.write_byte(OPCODE_ADDR, INST_BCS);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
         cpu.c = false;
 
         cpu.exec(2, &mut memory);
 
-        assert_eq!(cpu.pc, ENTRY_POINT + 0x02);
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x02);
+
+        // Reset CPU
+        cpu.reset(&mut memory);
 
         // Test page boundary crossed
-        memory.write_byte(OPCODE_ADDR, INST_BCC);
+        memory.write_byte(OPCODE_ADDR, INST_BCS);
         memory.write_byte(OPERAND_1_ADDR, 0xFF);
         cpu.c = true;
 
         cpu.exec(4, &mut memory);
 
-        assert_eq!(cpu.pc, ENTRY_POINT + 0x2 + 0xFF); // 0x2 is the size of the instruction
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x2 + 0xFF); // 0x2 is the size of the instruction
+    }
+
+    #[test]
+    fn inst_beq() {
+        let (mut cpu, mut memory) = init();
+
+        // Test branch taken
+        memory.write_byte(OPCODE_ADDR, INST_BEQ);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.z = true;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test branch not taken
+        memory.write_byte(OPCODE_ADDR, INST_BEQ);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.z = false;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x02);
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test page boundary crossed
+        memory.write_byte(OPCODE_ADDR, INST_BEQ);
+        memory.write_byte(OPERAND_1_ADDR, 0xFF);
+        cpu.z = true;
+
+        cpu.exec(4, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x2 + 0xFF); // 0x2 is the size of the instruction
+    }
+
+    #[test]
+    fn inst_bit_zp() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_BIT_ZP);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x0001, 0b1010_1010);
+
+        cpu.a = 0b1100_1100;
+        cpu.exec(3, &mut memory); // 0b1000_1000
+
+        assert!(cpu.n);
+        assert!(!cpu.v);
+        assert!(!cpu.z);
+
+        // Reset CPU
+
+        cpu.reset(&mut memory);
+
+        memory.write_byte(OPCODE_ADDR, INST_BIT_ZP);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        memory.write_byte(0x0001, 0b0100_0000);
+
+        cpu.a = 0b0000_0001;
+        cpu.exec(3, &mut memory); // 0b1000_1000
+
+        assert!(!cpu.n);
+        assert!(cpu.v);
+        assert!(cpu.z);
+    }
+
+    #[test]
+    fn inst_bit_a() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_BIT_A);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1234, 0b1010_1010);
+
+        cpu.a = 0b1100_1100;
+        cpu.exec(4, &mut memory); // 0b1000_1000
+
+        assert!(cpu.n);
+        assert!(!cpu.v);
+        assert!(!cpu.z);
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        memory.write_byte(OPCODE_ADDR, INST_BIT_A);
+        memory.write_byte(OPERAND_1_ADDR, 0x12);
+        memory.write_byte(OPERAND_2_ADDR, 0x34);
+        memory.write_byte(0x1234, 0b0100_0000);
+
+        cpu.a = 0b0000_0001;
+        cpu.exec(4, &mut memory); // 0b1000_1000
+
+        assert!(!cpu.n);
+        assert!(cpu.v);
+        assert!(cpu.z);
+    }
+
+    #[test]
+    fn inst_bmi() {
+        let (mut cpu, mut memory) = init();
+
+        // Test branch taken
+        memory.write_byte(OPCODE_ADDR, INST_BMI);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.n = true;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test branch not taken
+        memory.write_byte(OPCODE_ADDR, INST_BMI);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.n = false;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x02);
+    }
+
+    #[test]
+    fn inst_bne() {
+        let (mut cpu, mut memory) = init();
+
+        // Test branch taken
+        memory.write_byte(OPCODE_ADDR, INST_BNE);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.z = false;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test branch not taken
+        memory.write_byte(OPCODE_ADDR, INST_BNE);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.z = true;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x02);
+    }
+
+    #[test]
+    fn inst_bpl() {
+        let (mut cpu, mut memory) = init();
+
+        // Test branch taken
+        memory.write_byte(OPCODE_ADDR, INST_BPL);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.n = false;
+
+        cpu.exec(3, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x03); // 0x2 is the size of the instruction + 0x01 offset
+
+        // Reset CPU
+        cpu.reset(&mut memory);
+
+        // Test branch not taken
+        memory.write_byte(OPCODE_ADDR, INST_BPL);
+        memory.write_byte(OPERAND_1_ADDR, 0x01);
+        cpu.n = true;
+
+        cpu.exec(2, &mut memory);
+
+        assert_eq!(cpu.pc, INSTRUCTION_VEC + 0x02);
+    }
+
+    #[test]
+    fn inst_brk() {
+        let (mut cpu, mut memory) = init();
+
+        memory.write_byte(OPCODE_ADDR, INST_BRK);
+        memory.write_byte(INTERRUPT_VEC, 0x32);
+        memory.write_byte(INTERRUPT_VEC + 1, 0x12);
+
+        cpu.exec(6, &mut memory);
+
+        assert_eq!(cpu.pc, 0x1232);
+        assert!(cpu.i);
+
+        // Check if the program counter is pushed to the stack
+        assert_eq!(
+            memory.read_byte(STACK_VEC + 0xFF),
+            (INSTRUCTION_VEC >> 8) as Byte
+        );
+        assert_eq!(memory.read_byte(STACK_VEC + 0xFF - 1), 0x2);
+
+        // Check if the status register is pushed to the stack
+        assert_eq!(
+            memory.read_byte(STACK_VEC + 0xFF - 2),
+            cpu.status_byte() ^ 0b0001_0100
+        );
     }
 
     #[test]
