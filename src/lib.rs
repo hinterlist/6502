@@ -20,9 +20,10 @@ pub const STACK_VEC: Word = 0x0100;
 ///
 /// Instruction reference:
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
+/// https://www.masswerk.at/6502/6502_instruction_set.html
 
 // TOTAL: 56 instructions
-// READY: 16 instructions
+// READY: 15 instructions
 
 // ADC - Add with Carry
 const INST_ADC_IM: Byte = 0x69;
@@ -1121,8 +1122,6 @@ mod tests {
     const OPCODE_ADDR: Word = INSTRUCTION_VEC;
     const OPERAND_1_ADDR: Word = INSTRUCTION_VEC + 1;
     const OPERAND_2_ADDR: Word = OPERAND_1_ADDR + 1;
-
-    use std::mem;
 
     use super::*;
 
